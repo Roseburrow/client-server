@@ -1,0 +1,9 @@
+﻿<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+    <ItemGroup>
+	<Compile Include="Program.cs"/>
+	<Compile Include="LocationServer.cs"/>
+    </ItemGroup>
+    <Target Name="Build">
+	<Csc Sources="@(Compile)" OutputAssembly="locationServer.exe"/>
+    </Target>
+</Project>

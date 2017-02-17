@@ -6,9 +6,19 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading.Tasks;
+using System.Text.RegularExpressions;
 public class LocationServer
 {
     Dictionary<string, string> serverDatabase;
+
+    private enum protocol { whois, h1, h9, h0 };
+    private protocol activeProtocol = protocol.whois;
+
+    private enum requestType { lookup, changeLocation }
+    private requestType request;
+
+    private string username = null;
+    private string location = null;
 
     public LocationServer()
     {
@@ -22,7 +32,7 @@ public class LocationServer
         {
             return serverDatabase[name];
         }
-        return "false";
+        return null;
     }
 
     protected bool changeLocation(string name, string newLocation)
@@ -54,7 +64,7 @@ public class LocationServer
 
                 Console.WriteLine("Connected!");
 
-                doRequest(socketStream);
+                handleRequest(socketStream);
 
                 socketStream.Close();
                 connection.Close();
@@ -70,49 +80,125 @@ public class LocationServer
         }
     }
 
-    protected void doRequest(NetworkStream socketStream)
+    protected void handleRequest(NetworkStream socketStream)
     {
+        string input = null;
+        char c;
+        bool readFail = false;
+
         StreamWriter sw = new StreamWriter(socketStream);
         StreamReader sr = new StreamReader(socketStream);
 
-        string username = sr.ReadLine();
-        Console.WriteLine("Requested Name: " + username);
+        socketStream.ReadTimeout = 500;
 
-        string newLocation = sr.ReadLine();
-        Console.WriteLine("Requested Change: " + newLocation);
-
-        string requestType = getRequestType(username, newLocation);
-
-        if (requestType == "lookup")
+        do
         {
-            if (lookupDatabase(username) == "false")
-                return;
-            else
+            try
             {
-                sw.WriteLine(username + " is in " + lookupDatabase(username));
-            }    
+                c = (char)sr.Read();
+                input += c;
+            }
+            catch
+            {
+                readFail = true;
+                break;
+            }
         }
-        else if (requestType == "locationChange")
+        while (readFail == false);
+
+        RegexInputChecking(input);
+
+        if (request == requestType.lookup)
         {
-            if (changeLocation(username, newLocation))
-                sw.WriteLine(username + " location changed to be in " + newLocation);
+            LookupResponse(sw);
         }
-        else if (requestType == "ERROR")
-            sw.WriteLine("Something went wrong");
+        else if (request == requestType.changeLocation)
+        {
+            if (changeLocation(username, location))
+            {
+                sw.WriteLine(string.Format("{0} changed to be {1}", 
+                                            username, location));
+            } 
+        }
 
         sw.Flush();
-
         Console.WriteLine(sr.ReadToEnd());
     }
 
-    protected string getRequestType(string username, string location)
+    private void LookupResponse(StreamWriter sw)
     {
-        if (location == "" && username != "")
-            return "lookup";
 
-        else if (location != "" && username != "")
-            return "locationChange";
+    }
 
-        else return "ERROR";
+    private void RegexInputChecking(string input)
+    {
+        Regex nameH9 = new Regex(@"^GET /?(.*)\r\n$");
+        Regex locationH9 = new Regex(@"^PUT /(.*)\r\n\r\n(.*)\r\n$");
+
+        Regex nameH0 = new Regex(@"^GET /\?(.*)[ ]HTTP/1.0\r\n(.*)\r\n$");
+        Regex locationH0 = new Regex(@"^POST /(.*)[ ]HTTP/1.0\r\n"
+                                   + @"Content-Length: (\d+)\r\n(.*)\r\n(.*)$");
+
+        Regex nameH1 = new Regex(@"^GET \/\?name=(.*)[ ]HTTP/1.1\r\nHost:" 
+                                + @"[ ](.*)\r\n(.*)\r\n$");
+        Regex locationH1 = new Regex(@"^POST / HTTP/1.1\r\nHost: (.*)\r\n"
+                                    + @"Content-Length: (\d+)\r\n(.*)\r\n"
+                                    + @"name=(.*)&location=(.*)$");
+
+        Regex nameWhoIs = new Regex(@"^(.*)\r\n$");
+        Regex locationWhoIs = new Regex(@"^([^ ]+)[ ](.*)\r\n$");
+
+        if (locationH9.IsMatch(input))
+        {
+            activeProtocol = protocol.h9;
+            request = requestType.changeLocation;
+            username = locationH9.Match(input).Groups[1].Value;
+            location = locationH9.Match(input).Groups[2].Value;
+        }
+        else if (nameH9.IsMatch(input))
+        {
+            activeProtocol = protocol.h9;
+            request = requestType.lookup;
+            username = nameH9.Match(input).Groups[1].Value;
+        }
+        else if (locationH0.IsMatch(input))
+        {
+            activeProtocol = protocol.h0;
+            request = requestType.changeLocation;
+            username = locationH0.Match(input).Groups[1].Value;
+            location = locationH0.Match(input).Groups[4].Value;
+        }
+        else if (nameH0.IsMatch(input))
+        {
+            activeProtocol = protocol.h0;
+            request = requestType.lookup;
+            username = nameH0.Match(input).Groups[1].Value;
+        }
+        else if (locationH1.IsMatch(input))
+        {
+            activeProtocol = protocol.h1;
+            request = requestType.changeLocation;
+            username = locationH1.Match(input).Groups[4].Value;
+            location = locationH1.Match(input).Groups[5].Value;
+        }
+        else if (nameH1.IsMatch(input))
+        {
+            activeProtocol = protocol.h1;
+            request = requestType.lookup;
+            username = nameH1.Match(input).Groups[1].Value;
+        }
+        else if (locationWhoIs.IsMatch(input))
+        {
+            activeProtocol = protocol.whois;
+            request = requestType.changeLocation;
+            username = locationWhoIs.Match(input).Groups[1].Value;
+            location = locationWhoIs.Match(input).Groups[2].Value;
+        }
+        else if (nameWhoIs.IsMatch(input))
+        {
+            activeProtocol = protocol.whois;
+            request = requestType.lookup;
+            username = nameWhoIs.Match(input).Groups[1].Value;
+        }
     }
 }
