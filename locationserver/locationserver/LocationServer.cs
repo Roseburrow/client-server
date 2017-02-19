@@ -35,7 +35,7 @@ public class LocationServer
         return null;
     }
 
-    protected bool changeLocation(string name, string newLocation)
+    private bool changeLocation(string name, string newLocation)
     {
         if (serverDatabase.ContainsKey(name))
         {
@@ -80,16 +80,36 @@ public class LocationServer
         }
     }
 
-    protected void handleRequest(NetworkStream socketStream)
+    private void handleRequest(NetworkStream socketStream)
     {
         string input = null;
-        char c;
-        bool readFail = false;
 
         StreamWriter sw = new StreamWriter(socketStream);
         StreamReader sr = new StreamReader(socketStream);
 
-        socketStream.ReadTimeout = 500;
+        socketStream.ReadTimeout = 1000;
+
+        input = GetReaderData(sr);
+
+        RegexInputChecking(input);
+
+        if (request == requestType.lookup)
+        {
+            sw = LookupNameResponse(sw);
+        }
+        else if (request == requestType.changeLocation)
+        {
+            sw = ChangeLocationResponse(sw);
+        }
+
+        sw.Flush();
+    }
+
+    private string GetReaderData(StreamReader sr)
+    {
+        string input = "";
+        char c;
+        bool readFail = false;
 
         do
         {
@@ -106,28 +126,91 @@ public class LocationServer
         }
         while (readFail == false);
 
-        RegexInputChecking(input);
-
-        if (request == requestType.lookup)
-        {
-            LookupResponse(sw);
-        }
-        else if (request == requestType.changeLocation)
-        {
-            if (changeLocation(username, location))
-            {
-                sw.WriteLine(string.Format("{0} changed to be {1}", 
-                                            username, location));
-            } 
-        }
-
-        sw.Flush();
-        Console.WriteLine(sr.ReadToEnd());
+        return input;
     }
 
-    private void LookupResponse(StreamWriter sw)
+    private StreamWriter LookupNameResponse(StreamWriter sw)
     {
+        //Looks up a person and returns the location of that person into personsLocation.
+        string personsLocation = lookupDatabase(username);
 
+        if (personsLocation != null)
+        {
+            if (activeProtocol == protocol.whois)
+            {
+                sw.Write(string.Format("{0}\r\n", personsLocation));
+            }
+            else if (activeProtocol == protocol.h9)
+            {
+                sw.Write(string.Format("HTTP/0.9 200 OK\r\nContent-Type: "
+                                     + "text/plain\r\n\r\n{0}\r\n", personsLocation));
+            }
+            else if (activeProtocol == protocol.h0)
+            {
+                sw.Write(string.Format("HTTP/1.0 200 OK\r\nContent-Type: "
+                                     + "text/plain\r\n\r\n{0}\r\n", personsLocation));
+            }
+            else if (activeProtocol == protocol.h1)
+            {
+                sw.Write(string.Format("HTTP/1.1 200 OK\r\nContent-Type: "
+                                     + "text/plain\r\n\r\n{0}\r\n", personsLocation));
+            }
+        }
+        else if (personsLocation == null)
+        {
+            if (activeProtocol == protocol.whois)
+            {
+                sw.Write("ERROR: no entries found\r\n");
+            }
+            else if (activeProtocol == protocol.h9)
+            {
+                sw.Write("HTTP/0.9 404 Not Found\r\nContent-Type: "
+                       + "text/plain\r\n\r\n");
+            }
+            else if (activeProtocol == protocol.h0)
+            {
+                sw.Write("HTTP/1.0 404 Not Found\r\nContent-Type: "
+                       + "text/plain\r\n\r\n");
+            }
+            else if (activeProtocol == protocol.h1)
+            {
+                sw.Write("HTTP/1.1 404 Not Found\r\nContent-Type: "
+                       + "text/plain\r\n\r\n");
+            }
+        }
+        return sw;
+    }
+
+    private StreamWriter ChangeLocationResponse(StreamWriter sw)
+    {
+        if (changeLocation(username, location))
+        {
+            if (activeProtocol == protocol.whois)
+            {
+                sw.Write("OK\r\n");
+            }
+            else if (activeProtocol == protocol.h9)
+            {
+                sw.Write("HTTP/0.9 200 OK\r\nContent-Type: "
+                       + "text/plain\r\n\r\n");
+            }
+            else if (activeProtocol == protocol.h0)
+            {
+                sw.Write("HTTP/1.0 200 OK\r\nContent-Type: "
+                       + "text/plain\r\n\r\n");
+            }
+            else if (activeProtocol == protocol.h1)
+            {
+                sw.Write("HTTP/1.1 200 OK\r\nContent-Type: "
+                       + "text/plain\r\n\r\n");
+            }
+        }
+        else if (!changeLocation(username, location))
+        {
+            serverDatabase.Add(username, location);
+            sw.Write("OK\r\n");
+        }
+        return sw;
     }
 
     private void RegexInputChecking(string input)
@@ -135,18 +218,18 @@ public class LocationServer
         Regex nameH9 = new Regex(@"^GET /?(.*)\r\n$");
         Regex locationH9 = new Regex(@"^PUT /(.*)\r\n\r\n(.*)\r\n$");
 
-        Regex nameH0 = new Regex(@"^GET /\?(.*)[ ]HTTP/1.0\r\n(.*)\r\n$");
-        Regex locationH0 = new Regex(@"^POST /(.*)[ ]HTTP/1.0\r\n"
+        Regex nameH0 = new Regex(@"^GET /\?(.*) HTTP/1.0\r\n(.*)\r\n$");
+        Regex locationH0 = new Regex(@"^POST /(.*) HTTP/1.0\r\n"
                                    + @"Content-Length: (\d+)\r\n(.*)\r\n(.*)$");
 
-        Regex nameH1 = new Regex(@"^GET \/\?name=(.*)[ ]HTTP/1.1\r\nHost:" 
-                                + @"[ ](.*)\r\n(.*)\r\n$");
+        Regex nameH1 = new Regex(@"^GET \/\?name=(.*) HTTP/1.1\r\nHost:"
+                                + @" (.*)\r\n(.*)\r\n$");
         Regex locationH1 = new Regex(@"^POST / HTTP/1.1\r\nHost: (.*)\r\n"
                                     + @"Content-Length: (\d+)\r\n(.*)\r\n"
                                     + @"name=(.*)&location=(.*)$");
 
         Regex nameWhoIs = new Regex(@"^(.*)\r\n$");
-        Regex locationWhoIs = new Regex(@"^([^ ]+)[ ](.*)\r\n$");
+        Regex locationWhoIs = new Regex(@"^([^ ]+) (.*)\r\n$");
 
         if (locationH9.IsMatch(input))
         {

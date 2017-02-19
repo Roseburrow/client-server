@@ -9,7 +9,7 @@ using System.Threading.Tasks;
 
 namespace MyServer
 {
-    class Program
+    class RunServer
     {
         static void Main(string[] args)
         {

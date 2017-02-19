@@ -4,7 +4,7 @@ using System.Net.Sockets;
 using System.IO;
 using System.Net;
 
-public class Program
+public class RunClient
 {
     static void Main(string[] args)
     {
