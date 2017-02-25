@@ -7,49 +7,58 @@ using System.Net.Sockets;
 using System.Text;
 using System.Threading.Tasks;
 using System.Text.RegularExpressions;
+using System.Threading;
 public class LocationServer
 {
-    Dictionary<string, string> serverDatabase;
+    DatabaseManagement database;
+    Log log = new Log(null, false);
 
-    private enum protocol { whois, h1, h9, h0 };
-    private protocol activeProtocol = protocol.whois;
+    private string databaseFilePath = null;
 
-    private enum requestType { lookup, changeLocation }
-    private requestType request;
-
-    private string username = null;
-    private string location = null;
+    private bool setDebugger = false;
 
     public LocationServer()
     {
-        serverDatabase = new Dictionary<string, string>();
-        serverDatabase.Add("csstsb", "rbb-312");
+        database = new DatabaseManagement();
+        log.setResponse("OK");
     }
 
-    public string lookupDatabase(string name)
+    private void SplitArgs(string[] args)
     {
-        if (serverDatabase.ContainsKey(name))
+        for (int i = 0; i < args.Length; i++)
         {
-            return serverDatabase[name];
+            if (args[i] == "/d")
+            {
+                setDebugger = true;
+            }
+            else if (args[i] == "/l")
+            {
+                string filepath = args[++i];
+                log.SetLog(true, filepath);
+            }
+            else if (args[i] == "/f")
+            {
+                try
+                {
+                    databaseFilePath = args[++i];
+                    database.setFilePath(databaseFilePath);
+                    database.LoadDatabase();
+                }
+                catch
+                {
+                    Console.WriteLine("No file specified!");
+                }
+            }
         }
-        return null;
     }
 
-    private bool changeLocation(string name, string newLocation)
-    {
-        if (serverDatabase.ContainsKey(name))
-        {
-            serverDatabase[name] = newLocation;
-            return true;
-        }
-        return false;
-    }
-
-    public void runServer()
+    public void runServer(string[] args)
     {
         TcpListener listener;
         Socket connection;
-        NetworkStream socketStream;
+        RequestHandler Handler;
+
+        SplitArgs(args);
 
         try
         {
@@ -60,17 +69,14 @@ public class LocationServer
             while (true)
             {
                 connection = listener.AcceptSocket();
-                socketStream = new NetworkStream(connection);
+                log.setHost(((IPEndPoint)connection.RemoteEndPoint).Address.ToString());
 
-                Console.WriteLine("Connected!");
+                Handler = new RequestHandler(database, log, setDebugger);
 
-                handleRequest(socketStream);
+                Thread thread = new Thread(() => Handler.doRequest(connection));
+                thread.Start();
 
-                socketStream.Close();
-                connection.Close();
-
-                Console.WriteLine("Connection Closed!");
-                Console.ReadLine();
+                Console.WriteLine();
             }
         }
         catch (Exception e)
@@ -79,39 +85,75 @@ public class LocationServer
             Console.WriteLine(e.ToString());
         }
     }
+}
 
-    private void handleRequest(NetworkStream socketStream)
+public class RequestHandler
+{
+    Debug debugger = new Debug(false);
+    DatabaseManagement database;
+    Log logger;
+
+    private enum protocol { whois, h1, h9, h0 };
+    private protocol activeProtocol = protocol.whois;
+
+    private enum requestType { lookup, changeLocation }
+    private requestType request;
+
+    private string username = null;
+    private string location = null;
+
+    public RequestHandler(DatabaseManagement serverDatabase, Log logToSet, bool setDebugger)
     {
-        string input = null;
+        database = serverDatabase;
+        debugger.SetDebug(setDebugger);
+        logger = logToSet;
+    }
+
+    public void doRequest(Socket connection)
+    {
+        NetworkStream socketStream = new NetworkStream(connection);
+        Console.WriteLine("Connected.");
 
         StreamWriter sw = new StreamWriter(socketStream);
         StreamReader sr = new StreamReader(socketStream);
 
         socketStream.ReadTimeout = 1000;
 
-        input = GetReaderData(sr);
-
+        string input = GetReaderData(sr);
         RegexInputChecking(input);
+
+        debugger.ActualInputMsg(input);
+        debugger.RequestMsg(username, request.ToString());
 
         if (request == requestType.lookup)
         {
-            sw = LookupNameResponse(sw);
+            LookupNameResponse(sw);
+            logger.setRequest(string.Format("GET \"{0}\"", username));
         }
         else if (request == requestType.changeLocation)
         {
-            sw = ChangeLocationResponse(sw);
+            ChangeLocationResponse(sw);
+            database.SaveDatabse();
+
+            debugger.ChangeResponseMsg(username, location);
+            logger.setRequest(string.Format("PUT \"{0} {1}\"", username, location));
         }
 
         sw.Flush();
+        debugger.OutputMsg();
+        logger.WriteToFile();
+
+        socketStream.Close();
+        connection.Close();
+        Console.WriteLine("Connection Closed.");
     }
 
     private string GetReaderData(StreamReader sr)
     {
         string input = "";
         char c;
-        bool readFail = false;
 
-        do
+        while (true)
         {
             try
             {
@@ -120,19 +162,16 @@ public class LocationServer
             }
             catch
             {
-                readFail = true;
                 break;
             }
         }
-        while (readFail == false);
-
         return input;
     }
 
-    private StreamWriter LookupNameResponse(StreamWriter sw)
+    private void LookupNameResponse(StreamWriter sw)
     {
         //Looks up a person and returns the location of that person into personsLocation.
-        string personsLocation = lookupDatabase(username);
+        string personsLocation = database.lookupDatabase(username);
 
         if (personsLocation != null)
         {
@@ -177,13 +216,15 @@ public class LocationServer
                 sw.Write("HTTP/1.1 404 Not Found\r\nContent-Type: "
                        + "text/plain\r\n\r\n");
             }
+
+            logger.setResponse("RESPONSE UNKNOWN");
         }
-        return sw;
+        debugger.LookupResponseMsg(personsLocation);
     }
 
-    private StreamWriter ChangeLocationResponse(StreamWriter sw)
+    private void ChangeLocationResponse(StreamWriter sw)
     {
-        if (changeLocation(username, location))
+        if (database.changeLocation(username, location))
         {
             if (activeProtocol == protocol.whois)
             {
@@ -204,18 +245,22 @@ public class LocationServer
                 sw.Write("HTTP/1.1 200 OK\r\nContent-Type: "
                        + "text/plain\r\n\r\n");
             }
+            else
+            {
+                logger.setResponse("RESPONSE UNKNOWN");
+            }
+            return;
         }
-        else if (!changeLocation(username, location))
+        else if (!database.changeLocation(username, location))
         {
-            serverDatabase.Add(username, location);
-            sw.Write("OK\r\n");
+            database.Add(username, location);
+            ChangeLocationResponse(sw);
         }
-        return sw;
     }
 
     private void RegexInputChecking(string input)
     {
-        Regex nameH9 = new Regex(@"^GET /?(.*)\r\n$");
+        Regex nameH9 = new Regex(@"^GET /(.*)\r\n$");
         Regex locationH9 = new Regex(@"^PUT /(.*)\r\n\r\n(.*)\r\n$");
 
         Regex nameH0 = new Regex(@"^GET /\?(.*) HTTP/1.0\r\n(.*)\r\n$");
@@ -282,6 +327,11 @@ public class LocationServer
             activeProtocol = protocol.whois;
             request = requestType.lookup;
             username = nameWhoIs.Match(input).Groups[1].Value;
+        }
+        else
+        {
+            Console.WriteLine("Unrecognised Request");
+            logger.setResponse("UNKNOWN REQUEST");
         }
     }
 }

@@ -11,6 +11,6 @@ public class RunClient
         //Makes a new client.
         Client location = new Client();
         location.runClient(args);
-        Console.ReadLine();
+        Console.ReadKey();
     }
 }

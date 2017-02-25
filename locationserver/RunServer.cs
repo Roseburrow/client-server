@@ -15,7 +15,7 @@ namespace MyServer
         {
             //Make a new server instance.
             LocationServer server = new LocationServer();
-            server.runServer();
+            server.runServer(args);   
         }
     }
 }

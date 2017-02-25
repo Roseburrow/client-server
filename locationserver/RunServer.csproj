@@ -2,6 +2,9 @@
     <ItemGroup>
 	<Compile Include="RunServer.cs"/>
 	<Compile Include="LocationServer.cs"/>
+	<Compile Include="Debug.cs"/>
+	<Compile Include="Log.cs"/>
+	<Compile Include="DatabaseManagement.cs"/>
     </ItemGroup>
     <Target Name="Build">
 	<Csc Sources="@(Compile)" OutputAssembly="locationServer.exe"/>
