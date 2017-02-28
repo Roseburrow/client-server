@@ -30,6 +30,7 @@ IP addresses also work.
 
 ###/p 
 /p is used to specify the port you want to use. For example:
+
 `location.exe /p 43` - sets the port to 43.
 
 ###Protocol Types
@@ -48,3 +49,36 @@ Examples:
 `location.exe samuel /h 127.0.0.1 "is in a meeting" /p 13000 /h0`
 
 `location.exe /h localhost /p 12000 samuel "in room 403"`
+
+##Server Arguments:
+###/d
+/d enables debug mode which prints out additional useful information to the console if enabled. It shows you the response and request from the server as well as the reqest type. It is used as follows:
+
+`locationserver.exe /d`
+
+where 'locationserver.exe' is the name of the server executable.
+
+###/l
+/l enables the server log. This will log all server activities to a txt file in common log format. It is used as follows:
+
+`locationserver.exe /l C:\Users\username\Desktop\log.txt`
+
+/l must be followed by a file path for the log file to be saved to seperated by a single space. However, a file does not have to be specified as one will be created called 'log.txt' if one is not found in the given directory. For example:
+
+`locationserver.exe /l C:\Users\username\Desktop\`
+
+###/f
+/f enables saving of the database to a txt file. It is used in a similar way to /l above.
+
+`locationserver.exe /f C:\Users\username\Desktop\database.txt`
+
+This would tell the server to save the database to the file at the given directory while it is in use. It is also used for loading a database as well. The file at the given  directory would be loaded in and then saved when changed to the database are made. Just like /l a file does not need to be specified and will be created in the given directory.
+
+Again all these can be used together in any order as long as /l and /f have a file path after them. For example:
+
+`locationserver.exe /d /l C:\Users\username\Desktop\log.txt /f C:\Users\username\Desktop\database.txt`
+
+`locationserver.exe /l C:\Users\username\Desktop\log.txt /d`
+
+`locationserver.exe /d C:\Users\username\Desktop\ /d /l C:\Users\username\Desktop\`
+
