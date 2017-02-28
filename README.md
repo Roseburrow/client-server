@@ -1,5 +1,5 @@
 # Client and Server
-Uni project to make a simple client and server that communicate with one another.
+University project to make a simple client and server that communicate with one another. The client has to request a person and the server responds with that persons location. The client can also add new people or change the location of an existing person. Both the server and the client had to be able to handle HTTP 1.0, HTTP 0.9 and HTTP 1.1 and whois style requests. It can also make requests to web servers and works fine over localhost.
 
 ##Basic Use:
 Both programs take in arguments as their input by simply typing the argumentsafter the program exe file in a terminal like this:
