@@ -14,13 +14,11 @@ public class LocationServer
     Log log = new Log(null, false);
 
     private string databaseFilePath = null;
-
     private bool setDebugger = false;
 
     public LocationServer()
     {
         database = new DatabaseManagement();
-        log.setResponse("OK");
     }
 
     private void SplitArgs(string[] args)
@@ -55,7 +53,6 @@ public class LocationServer
     public void runServer(string[] args)
     {
         TcpListener listener;
-        Socket connection;
         RequestHandler Handler;
 
         SplitArgs(args);
@@ -68,15 +65,13 @@ public class LocationServer
 
             while (true)
             {
-                connection = listener.AcceptSocket();
-                log.setHost(((IPEndPoint)connection.RemoteEndPoint).Address.ToString());
+                TcpClient client = listener.AcceptTcpClient();
+                log.setHost(((IPEndPoint)client.Client.RemoteEndPoint).Address.ToString());
 
                 Handler = new RequestHandler(database, log, setDebugger);
 
-                Thread thread = new Thread(() => Handler.doRequest(connection));
+                Thread thread = new Thread(() => Handler.doRequest(client));
                 thread.Start();
-
-                Console.WriteLine();
             }
         }
         catch (Exception e)
@@ -99,8 +94,11 @@ public class RequestHandler
     private enum requestType { lookup, changeLocation }
     private requestType request;
 
+    private static readonly object locker = new object();
+
     private string username = null;
     private string location = null;
+    private string response = "";
 
     public RequestHandler(DatabaseManagement serverDatabase, Log logToSet, bool setDebugger)
     {
@@ -109,17 +107,21 @@ public class RequestHandler
         logger = logToSet;
     }
 
-    public void doRequest(Socket connection)
+    public void doRequest(TcpClient connection)
     {
-        NetworkStream socketStream = new NetworkStream(connection);
-        Console.WriteLine("Connected.");
-
+        NetworkStream socketStream = connection.GetStream();
         StreamWriter sw = new StreamWriter(socketStream);
         StreamReader sr = new StreamReader(socketStream);
 
         socketStream.ReadTimeout = 1000;
+        logger.setResponse("OK");
+        Console.WriteLine("Connected.");
 
         string input = GetReaderData(sr);
+
+        if (input == null)
+            return;
+
         RegexInputChecking(input);
 
         debugger.ActualInputMsg(input);
@@ -127,19 +129,22 @@ public class RequestHandler
 
         if (request == requestType.lookup)
         {
-            LookupNameResponse(sw);
+            LookupNameResponse();
             logger.setRequest(string.Format("GET \"{0}\"", username));
         }
         else if (request == requestType.changeLocation)
         {
-            ChangeLocationResponse(sw);
+            ChangeLocationResponse();
             database.SaveDatabse();
 
             debugger.ChangeResponseMsg(username, location);
             logger.setRequest(string.Format("PUT \"{0} {1}\"", username, location));
         }
 
+        sw.Write(response);
+
         sw.Flush();
+
         debugger.OutputMsg();
         logger.WriteToFile();
 
@@ -151,14 +156,14 @@ public class RequestHandler
     private string GetReaderData(StreamReader sr)
     {
         string input = "";
-        char c;
+        char[] characters = new char[3000];
 
-        while (true)
+        for (int i = 0; i < characters.Length; i++)
         {
             try
             {
-                c = (char)sr.Read();
-                input += c;
+                int numFromStream = sr.Read(characters, i, 1);
+                input += characters[i];
             }
             catch
             {
@@ -168,7 +173,7 @@ public class RequestHandler
         return input;
     }
 
-    private void LookupNameResponse(StreamWriter sw)
+    private void LookupNameResponse()
     {
         //Looks up a person and returns the location of that person into personsLocation.
         string personsLocation = database.lookupDatabase(username);
@@ -177,44 +182,45 @@ public class RequestHandler
         {
             if (activeProtocol == protocol.whois)
             {
-                sw.Write(string.Format("{0}\r\n", personsLocation));
+                response = string.Format("{0}\r\n", personsLocation);
             }
             else if (activeProtocol == protocol.h9)
             {
-                sw.Write(string.Format("HTTP/0.9 200 OK\r\nContent-Type: "
-                                     + "text/plain\r\n\r\n{0}\r\n", personsLocation));
+                response = string.Format("HTTP/0.9 200 OK\r\nContent-Type: "
+                                     + "text/plain\r\n\r\n{0}\r\n", personsLocation);
+
             }
             else if (activeProtocol == protocol.h0)
             {
-                sw.Write(string.Format("HTTP/1.0 200 OK\r\nContent-Type: "
-                                     + "text/plain\r\n\r\n{0}\r\n", personsLocation));
+                response = string.Format("HTTP/1.0 200 OK\r\nContent-Type: "
+                                     + "text/plain\r\n\r\n{0}\r\n", personsLocation);
             }
             else if (activeProtocol == protocol.h1)
             {
-                sw.Write(string.Format("HTTP/1.1 200 OK\r\nContent-Type: "
-                                     + "text/plain\r\n\r\n{0}\r\n", personsLocation));
+                response = string.Format("HTTP/1.1 200 OK\r\nContent-Type: "
+                                     + "text/plain\r\n\r\n{0}\r\n", personsLocation);
             }
         }
         else if (personsLocation == null)
         {
             if (activeProtocol == protocol.whois)
             {
-                sw.Write("ERROR: no entries found\r\n");
+                response = "ERROR: no entries found\r\n";
             }
             else if (activeProtocol == protocol.h9)
             {
-                sw.Write("HTTP/0.9 404 Not Found\r\nContent-Type: "
-                       + "text/plain\r\n\r\n");
+                response = "HTTP/0.9 404 Not Found\r\nContent-Type: "
+                       + "text/plain\r\n\r\n";
             }
             else if (activeProtocol == protocol.h0)
             {
-                sw.Write("HTTP/1.0 404 Not Found\r\nContent-Type: "
-                       + "text/plain\r\n\r\n");
+                response = "HTTP/1.0 404 Not Found\r\nContent-Type: "
+                       + "text/plain\r\n\r\n";
             }
             else if (activeProtocol == protocol.h1)
             {
-                sw.Write("HTTP/1.1 404 Not Found\r\nContent-Type: "
-                       + "text/plain\r\n\r\n");
+                response = "HTTP/1.1 404 Not Found\r\nContent-Type: "
+                       + "text/plain\r\n\r\n";
             }
 
             logger.setResponse("RESPONSE UNKNOWN");
@@ -222,28 +228,28 @@ public class RequestHandler
         debugger.LookupResponseMsg(personsLocation);
     }
 
-    private void ChangeLocationResponse(StreamWriter sw)
+    private void ChangeLocationResponse()
     {
         if (database.changeLocation(username, location))
         {
             if (activeProtocol == protocol.whois)
             {
-                sw.Write("OK\r\n");
+                response = "OK\r\n";
             }
             else if (activeProtocol == protocol.h9)
             {
-                sw.Write("HTTP/0.9 200 OK\r\nContent-Type: "
-                       + "text/plain\r\n\r\n");
+                response = "HTTP/0.9 200 OK\r\nContent-Type: "
+                       + "text/plain\r\n\r\n";
             }
             else if (activeProtocol == protocol.h0)
             {
-                sw.Write("HTTP/1.0 200 OK\r\nContent-Type: "
-                       + "text/plain\r\n\r\n");
+                response = "HTTP/1.0 200 OK\r\nContent-Type: "
+                       + "text/plain\r\n\r\n";
             }
             else if (activeProtocol == protocol.h1)
             {
-                sw.Write("HTTP/1.1 200 OK\r\nContent-Type: "
-                       + "text/plain\r\n\r\n");
+                response = "HTTP/1.1 200 OK\r\nContent-Type: "
+                       + "text/plain\r\n\r\n";
             }
             else
             {
@@ -254,7 +260,7 @@ public class RequestHandler
         else if (!database.changeLocation(username, location))
         {
             database.Add(username, location);
-            ChangeLocationResponse(sw);
+            ChangeLocationResponse();
         }
     }
 
@@ -274,7 +280,7 @@ public class RequestHandler
                                     + @"name=(.*)&location=(.*)$");
 
         Regex nameWhoIs = new Regex(@"^(.*)\r\n$");
-        Regex locationWhoIs = new Regex(@"^([^ ]+) (.*)\r\n$");
+        Regex locationWhoIs = new Regex(@"^([^ ]*) (.*)\r\n$");
 
         if (locationH9.IsMatch(input))
         {

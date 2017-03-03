@@ -13,6 +13,8 @@ public class Client
     private string name;
     private string location;
     private int locLen;
+    private int nameLen;
+    private int timeout = 1000;
 
     private enum protocol { whois, h1, h9, h0 }
 
@@ -36,7 +38,15 @@ public class Client
         }
         else
         {
-            SplitArgs(args);
+            try
+            {
+                //Try to split the arguments into the data needed...
+                SplitArgs(args);
+            }
+            catch
+            {
+                Console.WriteLine("One or more arguments were entered incorrectly. Double check your inputs...");
+            }
 
             try
             {
@@ -45,7 +55,7 @@ public class Client
             }
             catch
             {
-                Console.WriteLine(String.Format("Could not connect to server. IP: {0}  PORT: {1}", ip, port));
+                Console.WriteLine(string.Format("Could not connect to server. IP: {0}  PORT: {1}", ip, port));
             }
         }
     }
@@ -53,10 +63,10 @@ public class Client
     private void Request()
     {
         NetworkStream dataStream = client.GetStream();
-        dataStream.ReadTimeout = 1000;
-
         StreamWriter sw = new StreamWriter(dataStream);
         StreamReader sr = new StreamReader(dataStream);
+
+        SetTimeout(dataStream);
 
         if (location == null)
         {
@@ -86,42 +96,59 @@ public class Client
                                      + "{1}\r\n\r\n{2}", name, locLen, location));
 
             else if (protocolType == protocol.h1)
+            {
+                int contentLen = locLen + nameLen + 15;
                 sw.Write(string.Format("POST / HTTP/1.1\r\nHost: {0}\r\nContent-Length: "
                                      + "{1}\r\n\r\nname={2}&location={3}",
-                                        ip, locLen, name, location));
+                                        ip, contentLen, name, location));
+            }
         }
 
         //flushes the request, sending it to the server.
         sw.Flush();
 
         /*This is required because there is a read timeout for the client and the server.
-          It ensures that the response has been recieved before reying to read the response.*/
-        Thread.Sleep(2000);
+          It ensures that the response has been recieved before trying to read the response.*/
+        if (port != 80)
+        {
+            Thread.Sleep(2000);
+        }
+
         string response = GetResponse(sr);
+        //If it is a request to the internet print it in the correct format.
 
         if (port == 80)
-            Console.WriteLine(response);
+            Console.WriteLine("{0} is {1}", name, response);
 
         else ReadResponse(response);
+    }
+
+    private void SetTimeout(NetworkStream dataStream)
+    {
+        if (timeout != 0)
+            dataStream.ReadTimeout = timeout;
+
+        else dataStream.ReadTimeout = Timeout.Infinite;
     }
 
     private string GetResponse(StreamReader sr)
     {
         string response = "";
-        char c;
+        char[] characters = new char[3000];
 
-        while (true)
+        for (int i = 0; i < characters.Length; i++)
         {
             try
             {
-                c = (char)sr.Read();
-                if (c == '\uffff' || c == '\0')
-                    break;
+                int numFromStream = sr.Read(characters, i, 1);
 
-                response += c;
+                if (numFromStream == 0)
+                    break;
+                else response += characters[i];
             }
             catch
             {
+                Console.WriteLine("TIMED OUT");
                 break;
             }
         }
@@ -170,6 +197,7 @@ public class Client
     private void SplitArgs(string[] args)
     {
         bool nameSet = false;
+        bool locationSet = false;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -185,7 +213,7 @@ public class Client
             }
             else if (args[i] == "/t")
             {
-                client.ReceiveTimeout = int.Parse(args[++i]);
+                timeout = int.Parse(args[i + 1]);
                 i++;
             }
             else if (args[i] == "/h9")
@@ -200,15 +228,21 @@ public class Client
             {
                 protocolType = protocol.h0;
             }
-            else if (nameSet == false)
+            else if (!nameSet)
             {
                 name = args[i];
+                nameLen = name.Length;
                 nameSet = true;
             }
-            else
+            else if (nameSet && !locationSet)
             {
                 location = args[i];
                 locLen = location.Length;
+                locationSet = true;
+            }
+            else
+            {
+                //Do Nothing...
             }
         }
     }

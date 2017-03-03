@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -7,13 +8,13 @@ using System.Threading.Tasks;
 
 public class DatabaseManagement
 {
-    Dictionary<string, string> serverDatabase;
+    ConcurrentDictionary<string, string> serverDatabase;
     private static readonly object locker = new object();
     private string filePath;
 
     public DatabaseManagement()
     {
-        serverDatabase = new Dictionary<string, string>();
+        serverDatabase = new ConcurrentDictionary<string, string>();
     }
 
     public void setFilePath(string filepath)
@@ -26,18 +27,17 @@ public class DatabaseManagement
         if (filePath == null)
             return;
 
-        StreamWriter writer = new StreamWriter(filePath, false);
-
-        foreach (var entry in serverDatabase)
+        lock (locker)
         {
-            string line = string.Format("{0} {1}", entry.Key, entry.Value);
+            StreamWriter writer = new StreamWriter(filePath, false);
 
-            lock (locker)
+            foreach (var entry in serverDatabase)
             {
+                string line = string.Format("{0} {1}", entry.Key, entry.Value);
                 writer.WriteLine(line);
             }
+            writer.Close();
         }
-        writer.Close();
     }
 
     public void LoadDatabase()
@@ -70,7 +70,7 @@ public class DatabaseManagement
                             location += " ";
                     }
 
-                    serverDatabase.Add(name, location);
+                    serverDatabase.GetOrAdd(name, location);
                 }
                 catch
                 {
@@ -83,14 +83,21 @@ public class DatabaseManagement
 
     public void Add(string username, string location)
     {
-        serverDatabase.Add(username, location);
+        serverDatabase.GetOrAdd(username, location);
     }
 
     public string lookupDatabase(string name)
     {
-        if (serverDatabase.ContainsKey(name))
+        try
         {
-            return serverDatabase[name];
+            if (serverDatabase.ContainsKey(name))
+            {
+                return serverDatabase[name];
+            }
+        }
+        catch
+        {
+            Console.WriteLine("Null name requested in dictionary.");
         }
         return null;
     }

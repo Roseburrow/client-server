@@ -47,7 +47,7 @@ class Debug
 
     public void ActualInputMsg(string input)
     {
-        debugLine += string.Format("Actual Request:\n\n{0}", input);
+        debugLine += string.Format("Actual Request:\n{0}\n", input);
     }
 
     public void ActualResponseMsg(string response)
