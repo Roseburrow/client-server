@@ -115,18 +115,44 @@ public class RequestHandler
 
         socketStream.ReadTimeout = 1000;
         logger.setResponse("OK");
-        Console.WriteLine("Connected.");
 
-        string input = GetReaderData(sr);
+        Console.BackgroundColor = ConsoleColor.DarkGreen;
+        Console.WriteLine("Connected.");
+        Console.BackgroundColor = ConsoleColor.Black;
+
+        string input = GetReaderData(sr, connection, socketStream);
 
         if (input == null)
+        {
+            Console.WriteLine("TIMED OUT READING DATA");
             return;
+        }
 
-        RegexInputChecking(input);
+        if (!RegexInputChecking(input))
+            return;
 
         debugger.ActualInputMsg(input);
         debugger.RequestMsg(username, request.ToString());
 
+        WriteResponse(request);
+
+        sw.Write(response);
+
+        sw.Flush();
+
+        debugger.OutputMsg();
+        logger.WriteToFile();
+
+        socketStream.Close();
+        connection.Close();
+
+        Console.BackgroundColor = ConsoleColor.Red;
+        Console.WriteLine("Connection Closed.");
+        Console.BackgroundColor = ConsoleColor.Black;
+    }
+
+    private void WriteResponse(requestType request)
+    {
         if (request == requestType.lookup)
         {
             LookupNameResponse();
@@ -140,36 +166,35 @@ public class RequestHandler
             debugger.ChangeResponseMsg(username, location);
             logger.setRequest(string.Format("PUT \"{0} {1}\"", username, location));
         }
-
-        sw.Write(response);
-
-        sw.Flush();
-
-        debugger.OutputMsg();
-        logger.WriteToFile();
-
-        socketStream.Close();
-        connection.Close();
-        Console.WriteLine("Connection Closed.");
     }
 
-    private string GetReaderData(StreamReader sr)
+    private string GetReaderData(StreamReader sr, TcpClient hostConnection, NetworkStream socketStream)
     {
         string input = "";
-        char[] characters = new char[3000];
+        char[] characters = new char[1000];
 
-        for (int i = 0; i < characters.Length; i++)
+        do
         {
             try
             {
-                int numFromStream = sr.Read(characters, i, 1);
-                input += characters[i];
+                int numFromStream = sr.Read(characters, 0, characters.Length);
+
+                for (int i = 0; i < numFromStream; i++)
+                {
+                    input += characters[i];
+                }
             }
             catch
             {
+                if (input == "")
+                {
+                    return null;
+                }
+                Console.WriteLine("Timout");
                 break;
             }
-        }
+        } while (hostConnection.Connected && socketStream.DataAvailable);
+
         return input;
     }
 
@@ -264,7 +289,7 @@ public class RequestHandler
         }
     }
 
-    private void RegexInputChecking(string input)
+    private bool RegexInputChecking(string input)
     {
         Regex nameH9 = new Regex(@"^GET /(.*)\r\n$");
         Regex locationH9 = new Regex(@"^PUT /(.*)\r\n\r\n(.*)\r\n$");
@@ -273,7 +298,7 @@ public class RequestHandler
         Regex locationH0 = new Regex(@"^POST /(.*) HTTP/1.0\r\n"
                                    + @"Content-Length: (\d+)\r\n(.*)\r\n(.*)$");
 
-        Regex nameH1 = new Regex(@"^GET \/\?name=(.*) HTTP/1.1\r\nHost:"
+        Regex nameH1 = new Regex(@"^GET \/\?name=(.*) HTTP/1.1\r\n.*Host:"
                                 + @" (.*)\r\n(.*)\r\n$");
         Regex locationH1 = new Regex(@"^POST / HTTP/1.1\r\nHost: (.*)\r\n"
                                     + @"Content-Length: (\d+)\r\n(.*)\r\n"
@@ -339,5 +364,11 @@ public class RequestHandler
             Console.WriteLine("Unrecognised Request");
             logger.setResponse("UNKNOWN REQUEST");
         }
+
+        if (username == null)
+        {
+            return false;
+        }
+        return true;
     }
 }
